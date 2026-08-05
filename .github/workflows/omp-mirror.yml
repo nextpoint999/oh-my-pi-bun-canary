@@ -90,9 +90,23 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           NEW_TAGS: ${{ steps.versions.outputs.new_tags }}
           TARGETS_INPUT: ${{ inputs.targets }}
+          UPSTREAM: can1357/oh-my-pi
         run: |
           set -euo pipefail
-          for tag in $NEW_TAGS; do
+          # 按版本升序构建（最新版最后发布 → 自然成为 latest；避免旧版本
+          # 后发布抢走 latest 徽标——GitHub 默认按发布时间而非版本号定 latest）
+          for tag in $(echo "$NEW_TAGS" | tr ' ' '\n' | sort -V); do
             echo "===== 构建上游 ${tag} ====="
             bash scripts/build-omp-release.sh "$tag" "${TARGETS_INPUT}"
           done
+          # 显式把"上游最新版本"的镜像 release 设为 latest（make_latest=true），
+          # 覆盖任何日期顺序造成的误判（如手动补发旧版本后）。
+          NEWEST="$(gh api "repos/${UPSTREAM}/releases/latest" --jq '.tag_name' 2>/dev/null || true)"
+          if [ -n "$NEWEST" ]; then
+            RID="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${NEWEST}" --jq '.id' 2>/dev/null || true)"
+            if [ -n "$RID" ]; then
+              gh api -X PATCH "repos/${GITHUB_REPOSITORY}/releases/${RID}" -f make_latest=true >/dev/null \
+                && echo "已将 ${NEWEST} 设为 latest" \
+                || echo "[warn] make_latest 设置失败（预发布版本无法设为 latest，属预期）"
+            fi
+          fi

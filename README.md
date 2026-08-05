@@ -70,6 +70,11 @@
   `--target main` 创建。
 - **资产重复上传坑**：`"$BIN_DIR"/*` 通配已包含 checksums.txt，不要再显式传入，
   否则 422 `ReleaseAsset.name already exists`（gh 会自动回滚已建 release）。
+- **latest 徽标维护**：GitHub 默认按发布时间（而非版本号）决定哪个 release 是
+  Latest，补发旧版本会抢走徽标。workflow 已内置两层防护：
+  1) 批次内按版本升序构建（`sort -V`），最新版最后发布；
+  2) 构建完成后调用 `make_latest=true` API 把上游最新版本显式设为 latest，
+  覆盖任何日期顺序误判。
 - **bun 版本号坑**：`bun --version` 只返回 `1.4.0`，完整 canary 版本号
   （`1.4.0-canary.1+b58cd4685`）要用 `bun --revision` 取。
 
