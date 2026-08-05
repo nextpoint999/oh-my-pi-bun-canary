@@ -10,7 +10,7 @@
 #                     可选: win32-x64, darwin-arm64, darwin-x64, linux-x64,
 #                           linux-musl-x64, linux-arm64, linux-musl-arm64
 #
-# 依赖: bun(canary) / git / curl / python3(zipfile) / gh(仅发布步骤)
+# 依赖: bun(canary) / git / curl / python3(zipfile) / sha256sum / gh(仅发布步骤)
 #
 # 背景知识(踩坑记录):
 #   * bun canary 不做 npm 包发布，bun build --compile 交叉编译时按版本去 npm
@@ -18,6 +18,7 @@
 #     $BUN_INSTALL_CACHE_DIR/bun-<compile-target>-v<主.次.修>，bun 检查到文件
 #     存在即跳过下载（源码 src/standalone_graph/StandaloneModuleGraph.rs）。
 #   * canary tag 是移动 tag，zip 资产用 aarch64 命名（bun-linux-aarch64.zip）。
+#     所有运行时下载均与 canary release 的 SHASUMS256.txt 做 sha256 完整性校验。
 #   * pi_natives 原生模块（Rust/N-API）不交叉编译，直接取官方 npm leaf 包
 #     @oh-my-pi/pi-natives-<platform>，版本号 = tag 去掉 v 前缀。
 #     musl 目标复用 linux 同名 .node（官方脚本约定）。
@@ -28,46 +29,32 @@ UPSTREAM_REPO="can1357/oh-my-pi"
 TAG="${1:?用法: $0 <upstream-tag> [targets]}"
 TARGETS_ARG="${2:-all}"
 
+# 防止 - 开头的 tag 被 git/gh 解析为选项
+case "$TAG" in
+  -*) echo "[error] tag 不能以 - 开头: ${TAG}"; exit 1 ;;
+esac
+
 BUN_CACHE_DIR="${BUN_INSTALL_CACHE_DIR:-$HOME/.bun/install/cache}"
-# 注意: `bun --version` 只返回 1.4.0，canary 详情在 `bun --revision`（如 1.4.0-canary.1+b58cd4685）
-BUN_REV="$(bun --revision 2>/dev/null || echo "unknown")"          # 完整版本+commit
-BUN_FULL="$(echo "${BUN_REV}" | cut -d+ -f1)"                      # 1.4.0-canary.1
-BUN_VERSION="$(echo "${BUN_FULL}" | cut -d. -f1-3)"                # 1.4.0（缓存文件名用）
+# 注意: `bun --version` 恒为主.次.修(1.4.0)，canary 详情在 `bun --revision`（如 1.4.0-canary.1+b58cd4685）。
+# 缓存文件名必须用 --version 的 主.次.修；用 --revision 截取会把 0-canary 混进第三段。
+BUN_REV="$(bun --revision 2>/dev/null || bun --version)"                # 完整版本+commit
+BUN_FULL="$(echo "${BUN_REV}" | cut -d+ -f1)"                           # 1.4.0-canary.1（标题/说明用）
+BUN_VERSION="$(bun --version | cut -d. -f1-3)"                          # 1.4.0（缓存文件名用）
+case "$BUN_VERSION" in
+  [0-9]*.[0-9]*.[0-9]*) : ;;
+  *) echo "[error] 无法解析 bun 版本: ${BUN_REV}"; exit 1 ;;
+esac
 VER="${TAG#v}"   # v17.2.9 -> 17.2.9
 
-WORK="$(mktemp -d)"
-trap 'rm -rf "$WORK"' EXIT
-
-echo "===== [1/6] 克隆 ${UPSTREAM_REPO} @ ${TAG} ====="
-git clone --depth 1 --branch "$TAG" "https://github.com/${UPSTREAM_REPO}.git" "$WORK/omp"
-cd "$WORK/omp"
-
-echo "===== [2/6] bun install (bun ${BUN_VERSION}) ====="
-if [ -f bun.lock ]; then
-  bun install --frozen-lockfile
+# 归一化目标列表（大小写不敏感、去空白、去空项）
+if [ "${TARGETS_ARG,,}" = "all" ]; then
+  TARGETS="win32-x64,darwin-arm64,darwin-x64,linux-x64,linux-musl-x64,linux-arm64,linux-musl-arm64"
 else
-  bun install
+  TARGETS="$(echo "${TARGETS_ARG}" | tr ',' '\n' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | grep -v '^$' | paste -sd, -)"
+  [ -n "$TARGETS" ] || { echo "[error] targets 为空"; exit 1; }
 fi
+echo "=== 构建目标: ${TARGETS} ==="
 
-echo "===== [3/6] 拉取各平台 pi_natives 原生模块 (npm leaf) ====="
-# target id -> npm leaf 平台名（musl 复用 linux 同名 addon）
-NATIVE_LEAVES=(win32-x64 linux-x64 linux-arm64 darwin-arm64 darwin-x64)
-mkdir -p packages/natives/native
-for leaf in "${NATIVE_LEAVES[@]}"; do
-  tarball="https://registry.npmjs.org/@oh-my-pi/pi-natives-${leaf}/-/pi-natives-${leaf}-${VER}.tgz"
-  code="$(curl -sIL -o /dev/null -w '%{http_code}' "$tarball")"
-  if [ "$code" != "200" ]; then
-    echo "  [warn] ${leaf}@${VER} 不存在(HTTP ${code})，改用 latest"
-    tarball="$(curl -s "https://registry.npmjs.org/@oh-my-pi/pi-natives-${leaf}/latest" \
-      | grep -o '"tarball":"[^"]*"' | head -1 | cut -d'"' -f4)"
-  fi
-  curl -sL "$tarball" | tar -xz -C "$WORK" package
-  cp "$WORK"/package/*.node packages/natives/native/
-  echo "  + $(ls "$WORK"/package/*.node | xargs -n1 basename | tr '\n' ' ')"
-done
-ls -la packages/natives/native/
-
-echo "===== [4/6] 注入 bun canary 各平台编译运行时 (canary tag) ====="
 # target id -> (canary zip 资产名 | 缓存文件名 bun-<compile-target>-v<ver>)
 # 注意: Bun 内部把 arm64 规范化为 npm 命名 "aarch64"（Display 拼缓存文件名），
 # 所以 darwin-arm64/linux-arm64 的缓存名用 aarch64，不是 arm64。
@@ -80,23 +67,85 @@ RUNTIMES=(
   "linux-arm64|bun-linux-aarch64.zip|bun-linux-aarch64"
   "linux-musl-arm64|bun-linux-aarch64-musl.zip|bun-linux-aarch64-musl"
 )
-mkdir -p "$BUN_CACHE_DIR"
+# target id -> npm leaf 平台名（musl 复用 linux 同名 addon）
+declare -A TARGET_LEAF=(
+  [win32-x64]=win32-x64
+  [darwin-arm64]=darwin-arm64
+  [darwin-x64]=darwin-x64
+  [linux-x64]=linux-x64
+  [linux-musl-x64]=linux-x64
+  [linux-arm64]=linux-arm64
+  [linux-musl-arm64]=linux-arm64
+)
+
+# 只保留请求目标的运行时条目与 leaf（避免无效下载）
+RUN_ENTRIES=()
+LEAF_NEEDED=""
 for entry in "${RUNTIMES[@]}"; do
+  id="${entry%%|*}"
+  case ",${TARGETS}," in
+    *",${id},"*)
+      RUN_ENTRIES+=("$entry")
+      leaf="${TARGET_LEAF[$id]}"
+      case ",${LEAF_NEEDED}," in *",${leaf},"*) ;; *) LEAF_NEEDED="${LEAF_NEEDED},${leaf}" ;; esac
+      ;;
+  esac
+done
+LEAF_NEEDED="${LEAF_NEEDED#,}"
+[ -n "$LEAF_NEEDED" ] || { echo "[error] 目标列表不含任何已知平台"; exit 1; }
+
+WORK="$(mktemp -d)"
+trap 'rm -rf "$WORK"' EXIT
+
+echo "===== [1/6] 克隆 ${UPSTREAM_REPO} @ ${TAG} ====="
+git clone --depth 1 --branch="$TAG" "https://github.com/${UPSTREAM_REPO}.git" "$WORK/omp"
+cd "$WORK/omp"
+
+echo "===== [2/6] bun install (bun ${BUN_VERSION}) ====="
+if [ -f bun.lock ]; then
+  bun install --frozen-lockfile
+else
+  bun install
+fi
+
+echo "===== [3/6] 拉取 pi_natives 原生模块 (npm leaf: ${LEAF_NEEDED}) ====="
+mkdir -p packages/natives/native
+IFS=',' read -ra LEAFS <<< "$LEAF_NEEDED"
+for leaf in "${LEAFS[@]}"; do
+  tarball="https://registry.npmjs.org/@oh-my-pi/pi-natives-${leaf}/-/pi-natives-${leaf}-${VER}.tgz"
+  code="$(curl -fsIL -o /dev/null -w '%{http_code}' "$tarball" || true)"
+  if [ "$code" != "200" ]; then
+    echo "  [warn] ${leaf}@${VER} 不存在(HTTP ${code})，改用 latest"
+    tarball="$(curl -fsSL "https://registry.npmjs.org/@oh-my-pi/pi-natives-${leaf}/latest" \
+      | grep -o '"tarball":"[^"]*"' | head -1 | cut -d'"' -f4)"
+    [ -n "$tarball" ] || { echo "[error] ${leaf} latest 元数据解析失败"; exit 1; }
+  fi
+  curl -fsSL "$tarball" | tar -xz -C "$WORK" package
+  cp "$WORK"/package/*.node packages/natives/native/
+  echo "  + $(ls "$WORK"/package/*.node | xargs -n1 basename | tr '\n' ' ')  <- $(basename "$tarball")"
+done
+ls -la packages/natives/native/
+
+echo "===== [4/6] 注入 bun canary 编译运行时 (共 ${#RUN_ENTRIES[@]} 个, 含 sha256 校验) ====="
+mkdir -p "$BUN_CACHE_DIR"
+curl -fsSL -o "$WORK/shas.txt" "https://github.com/oven-sh/bun/releases/download/canary/SHASUMS256.txt"
+for entry in "${RUN_ENTRIES[@]}"; do
   id="${entry%%|*}"; rest="${entry#*|}"; asset="${rest%%|*}"; cname="${rest#*|}"
-  curl -sL -o "$WORK/rt.zip" "https://github.com/oven-sh/bun/releases/download/canary/${asset}"
+  curl -fsSL -o "$WORK/rt.zip" "https://github.com/oven-sh/bun/releases/download/canary/${asset}"
+  # 供应链完整性校验：与 canary release 的 SHASUMS256.txt 比对
+  expected="$(awk -v f="${asset}" '$2==f {print $1}' "$WORK/shas.txt")"
+  [ -n "$expected" ] || { echo "[error] ${asset} 不在 SHASUMS256.txt 中"; exit 1; }
+  actual="$(sha256sum "$WORK/rt.zip" | cut -d' ' -f1)"
+  [ "$expected" = "$actual" ] || { echo "[error] ${asset} sha256 不匹配 (期望 ${expected}, 实际 ${actual})"; exit 1; }
   python3 -m zipfile -e "$WORK/rt.zip" "$WORK/rt"
   rtbin="$(find "$WORK/rt" -type f \( -name bun -o -name bun.exe \) | head -1)"
+  [ -n "$rtbin" ] || { echo "[error] ${asset} 内未找到 bun/bun.exe"; exit 1; }
   cp "$rtbin" "$BUN_CACHE_DIR/${cname}-v${BUN_VERSION}"
   rm -rf "$WORK/rt" "$WORK/rt.zip"
-  echo "  + ${cname}-v${BUN_VERSION}  <-  ${asset}"
+  echo "  + ${cname}-v${BUN_VERSION}  <-  ${asset} (sha256 ${actual:0:12})"
 done
 
 echo "===== [5/6] 构建二进制 ====="
-if [ "$TARGETS_ARG" = "all" ]; then
-  TARGETS="win32-x64,darwin-arm64,darwin-x64,linux-x64,linux-musl-x64,linux-arm64,linux-musl-arm64"
-else
-  TARGETS="$TARGETS_ARG"
-fi
 bun scripts/ci-release-build-binaries.ts --targets="$TARGETS"
 
 echo "===== [6/6] 发布到本仓库 ====="
@@ -113,21 +162,22 @@ if [ -n "${GITHUB_REPOSITORY:-}" ]; then
 fi
 RELEASE_TAG="${TAG}"   # 发布 tag 与上游保持一致（如 v17.2.9）
 # 上游克隆自带同名本地 tag，gh 会报 "tag exists locally but has not been
-# pushed" 而拒绝创建；删掉本地 tag，并显式 --target main 在目标仓库新建。
+# pushed" 而拒绝创建；删掉本地 tag，并显式 --target 默认分支在目标仓库新建。
 git tag -d "$RELEASE_TAG" 2>/dev/null || true
 if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
   echo "release ${RELEASE_TAG} 已存在，跳过"
   exit 0
 fi
+DEFAULT_BRANCH="$(gh repo view --json defaultBranchRef -q '.defaultBranchRef.name' 2>/dev/null || echo main)"
 ( cd "$BIN_DIR" && sha256sum ./* > checksums.txt )
 # 注意: "$BIN_DIR"/* 已包含 checksums.txt，不能重复显式传入（否则 422 already exists）
 gh release create "$RELEASE_TAG" "$BIN_DIR"/* \
-  --target main \
+  --target "$DEFAULT_BRANCH" \
   --title "omp ${TAG} (bun canary ${BUN_FULL})" \
   --notes "**上游**: [${UPSTREAM_REPO} ${TAG}](https://github.com/${UPSTREAM_REPO}/releases/tag/${TAG})
 
 **构建工具**: bun canary \`${BUN_FULL}\`（revision \`${BUN_REV}\`）
-**平台**: win32-x64 / linux-x64 / linux-musl-x64 / linux-arm64 / linux-musl-arm64 / darwin-x64 / darwin-arm64
+**平台**: ${TARGETS}
 使用 bun canary 交叉编译的全平台镜像构建，附 SHA256 校验和。"
 # 若上游是预发布（tag 含 -），标记为 prerelease
 if [[ "$TAG" == *-* ]]; then

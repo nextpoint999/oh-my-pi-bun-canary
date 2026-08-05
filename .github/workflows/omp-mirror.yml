@@ -6,10 +6,11 @@
 # （发布 tag 与上游保持一致，如 v17.2.9）。
 #
 # 说明:
-#   * 每次运行最多处理 3 个新版本（release 不频繁，后续轮询自动补齐遗漏版本）
+#   * 每次运行最多处理 5 个新版本（release 不频繁，后续轮询自动补齐遗漏版本）
 #   * 原生模块直接取官方 npm leaf（免 bazel 交叉编译），运行时从 bun canary
-#     tag 注入（canary 不做 npm 发布，详见 scripts/build-omp-release.sh 头注释）
+#     tag 注入并经 SHASUMS256.txt 校验（详见 scripts/build-omp-release.sh 头注释）
 #   * 本仓库需开启 Actions；发布用的 GITHUB_TOKEN 自动授权（contents: write）
+#   * 安全: 用户输入（tag/targets）一律经 env 传递，禁止插值进 run: 脚本
 # =============================================================================
 name: Mirror omp releases
 
@@ -42,10 +43,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        # 固定 SHA（= actions/checkout@v4），防供应链篡改；升级时同步更新
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
       - name: 安装 bun canary
-        uses: oven-sh/setup-bun@v2
+        # 固定 SHA（= oven-sh/setup-bun@v2），防供应链篡改；升级时同步更新
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
         with:
           bun-version: canary
 
@@ -53,26 +57,28 @@ jobs:
         id: versions
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG_INPUT: ${{ inputs.tag }}
         run: |
           set -euo pipefail
           UPSTREAM="can1357/oh-my-pi"
-          if [ -n "${{ inputs.tag }}" ]; then
-            TAGS="${{ inputs.tag }}"
+          if [ -n "${TAG_INPUT}" ]; then
+            TAGS="${TAG_INPUT}"
           else
-            TAGS="$(gh api "repos/${UPSTREAM}/releases?per_page=30" --jq '.[].tag_name')"
+            TAGS="$(gh api "repos/${UPSTREAM}/releases?per_page=100" --jq '.[].tag_name')"
           fi
           # 本仓库已发布的版本（发布 tag 与上游同名，如 v17.2.9）
           MIRRORED="$(gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100" --jq '.[].tag_name' 2>/dev/null || true)"
           NEW=""
           for t in $TAGS; do
-            if printf '%s\n' "$MIRRORED" | grep -qx "${t}"; then
+            # -F: 固定字符串匹配（tag 中的 . + 是正则元字符，不能当正则用）
+            if printf '%s\n' "$MIRRORED" | grep -Fqx "${t}"; then
               echo "已镜像: ${t}，跳过"
             else
               NEW="$NEW $t"
             fi
           done
-          # 每轮最多处理 3 个新版本，避免单轮超时；遗漏的由后续轮询补齐
-          NEW="$(echo "$NEW" | tr ' ' '\n' | sed '/^$/d' | head -3)"
+          # 每轮最多处理 5 个新版本，避免单轮超时；遗漏的由后续轮询补齐
+          NEW="$(echo "$NEW" | tr ' ' '\n' | sed '/^$/d' | head -5)"
           if [ -z "$NEW" ]; then
             echo "没有新的上游版本需要构建"
           fi
@@ -83,9 +89,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           NEW_TAGS: ${{ steps.versions.outputs.new_tags }}
+          TARGETS_INPUT: ${{ inputs.targets }}
         run: |
           set -euo pipefail
           for tag in $NEW_TAGS; do
             echo "===== 构建上游 ${tag} ====="
-            bash scripts/build-omp-release.sh "$tag" "${{ inputs.targets }}"
+            bash scripts/build-omp-release.sh "$tag" "${TARGETS_INPUT}"
           done
