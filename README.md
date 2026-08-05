@@ -65,8 +65,17 @@
 - **gh 仓库推断坑**：`gh` 默认按当前目录 git remote 推断目标仓库，而构建脚本 CWD
   在上游克隆里，必须显式 `export GH_REPO="$GITHUB_REPOSITORY"`，否则会把上游
   误判为发布目标（`gh release view` 误报"已存在"导致发布被跳过）。
+- **gh 本地 tag 坑**：上游克隆自带同名本地 tag，`gh release create` 会报
+  "tag exists locally but has not been pushed"；先 `git tag -d` 再带
+  `--target main` 创建。
+- **资产重复上传坑**：`"$BIN_DIR"/*` 通配已包含 checksums.txt，不要再显式传入，
+  否则 422 `ReleaseAsset.name already exists`（gh 会自动回滚已建 release）。
+- **bun 版本号坑**：`bun --version` 只返回 `1.4.0`，完整 canary 版本号
+  （`1.4.0-canary.1+b58cd4685`）要用 `bun --revision` 取。
 
 ## 已验证
 
-2026-08-05 在 Linux (aarch64) 上用 bun 1.4.0-canary.1 完整跑通
-`bash scripts/build-omp-release.sh v17.2.9`：7 个平台全部构建成功。
+- 2026-08-05 本地 (Linux aarch64, bun 1.4.0-canary.1) 跑通 `v17.2.9` 全 7 平台构建。
+- 2026-08-05 已在 GitHub Actions (ubuntu-latest) 实际端到端跑通：构建 7 平台
+  并发布 [v17.2.9 release](https://github.com/nextpoint999/oh-my-pi-bun-canary/releases/tag/v17.2.9)
+  （8 个资产含 checksums.txt，exe 已校验 PE32+ AMD64）。
