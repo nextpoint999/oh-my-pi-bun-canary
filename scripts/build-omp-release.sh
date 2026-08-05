@@ -171,9 +171,10 @@ fi
 DEFAULT_BRANCH="$(gh repo view --json defaultBranchRef -q '.defaultBranchRef.name' 2>/dev/null || echo main)"
 ( cd "$BIN_DIR" && sha256sum ./* > checksums.txt )
 # 注意: "$BIN_DIR"/* 已包含 checksums.txt，不能重复显式传入（否则 422 already exists）
+# release 名与上游保持一致（纯 tag），bun 版本信息放 body
 gh release create "$RELEASE_TAG" "$BIN_DIR"/* \
   --target "$DEFAULT_BRANCH" \
-  --title "omp ${TAG} (bun canary ${BUN_FULL})" \
+  --title "${TAG}" \
   --notes "**上游**: [${UPSTREAM_REPO} ${TAG}](https://github.com/${UPSTREAM_REPO}/releases/tag/${TAG})
 
 **构建工具**: bun canary \`${BUN_FULL}\`（revision \`${BUN_REV}\`）
