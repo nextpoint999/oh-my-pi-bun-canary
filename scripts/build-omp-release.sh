@@ -109,12 +109,16 @@ if [ -n "${GITHUB_REPOSITORY:-}" ]; then
   export GH_REPO="$GITHUB_REPOSITORY"
 fi
 RELEASE_TAG="${TAG}"   # 发布 tag 与上游保持一致（如 v17.2.9）
+# 上游克隆自带同名本地 tag，gh 会报 "tag exists locally but has not been
+# pushed" 而拒绝创建；删掉本地 tag，并显式 --target main 在目标仓库新建。
+git tag -d "$RELEASE_TAG" 2>/dev/null || true
 if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
   echo "release ${RELEASE_TAG} 已存在，跳过"
   exit 0
 fi
 ( cd "$BIN_DIR" && sha256sum ./* > checksums.txt )
 gh release create "$RELEASE_TAG" "$BIN_DIR"/* "$BIN_DIR"/checksums.txt \
+  --target main \
   --title "omp ${TAG} (bun canary ${BUN_VERSION})" \
   --notes "**上游**: [${UPSTREAM_REPO} ${TAG}](https://github.com/${UPSTREAM_REPO}/releases/tag/${TAG})
 
