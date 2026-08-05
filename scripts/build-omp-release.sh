@@ -29,7 +29,9 @@ TAG="${1:?用法: $0 <upstream-tag> [targets]}"
 TARGETS_ARG="${2:-all}"
 
 BUN_CACHE_DIR="${BUN_INSTALL_CACHE_DIR:-$HOME/.bun/install/cache}"
-BUN_VERSION="$(bun --version | cut -d. -f1-3)"
+BUN_VERSION="$(bun --version | cut -d. -f1-3)"    # 1.4.0（缓存文件名用）
+BUN_FULL="$(bun --version)"                       # 1.4.0-canary.1
+BUN_REV="$(bun --revision 2>/dev/null || echo "${BUN_FULL}")"  # 1.4.0-canary.1+b58cd4685
 VER="${TAG#v}"   # v17.2.9 -> 17.2.9
 
 WORK="$(mktemp -d)"
@@ -117,12 +119,15 @@ if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
   exit 0
 fi
 ( cd "$BIN_DIR" && sha256sum ./* > checksums.txt )
-gh release create "$RELEASE_TAG" "$BIN_DIR"/* "$BIN_DIR"/checksums.txt \
+# 注意: "$BIN_DIR"/* 已包含 checksums.txt，不能重复显式传入（否则 422 already exists）
+gh release create "$RELEASE_TAG" "$BIN_DIR"/* \
   --target main \
-  --title "omp ${TAG} (bun canary ${BUN_VERSION})" \
+  --title "omp ${TAG} (bun canary ${BUN_FULL})" \
   --notes "**上游**: [${UPSTREAM_REPO} ${TAG}](https://github.com/${UPSTREAM_REPO}/releases/tag/${TAG})
 
-使用 bun canary (${BUN_VERSION}) 交叉编译的全平台镜像构建。包含 7 个平台产物与 SHA256 校验和。"
+**构建工具**: bun canary \`${BUN_FULL}\`（revision \`${BUN_REV}\`）
+**平台**: win32-x64 / linux-x64 / linux-musl-x64 / linux-arm64 / linux-musl-arm64 / darwin-x64 / darwin-arm64
+使用 bun canary 交叉编译的全平台镜像构建，附 SHA256 校验和。"
 # 若上游是预发布（tag 含 -），标记为 prerelease
 if [[ "$TAG" == *-* ]]; then
   gh release edit "$RELEASE_TAG" --prerelease >/dev/null 2>&1 || true
