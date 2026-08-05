@@ -29,9 +29,10 @@ TAG="${1:?用法: $0 <upstream-tag> [targets]}"
 TARGETS_ARG="${2:-all}"
 
 BUN_CACHE_DIR="${BUN_INSTALL_CACHE_DIR:-$HOME/.bun/install/cache}"
-BUN_VERSION="$(bun --version | cut -d. -f1-3)"    # 1.4.0（缓存文件名用）
-BUN_FULL="$(bun --version)"                       # 1.4.0-canary.1
-BUN_REV="$(bun --revision 2>/dev/null || echo "${BUN_FULL}")"  # 1.4.0-canary.1+b58cd4685
+# 注意: `bun --version` 只返回 1.4.0，canary 详情在 `bun --revision`（如 1.4.0-canary.1+b58cd4685）
+BUN_REV="$(bun --revision 2>/dev/null || echo "unknown")"          # 完整版本+commit
+BUN_FULL="$(echo "${BUN_REV}" | cut -d+ -f1)"                      # 1.4.0-canary.1
+BUN_VERSION="$(echo "${BUN_FULL}" | cut -d. -f1-3)"                # 1.4.0（缓存文件名用）
 VER="${TAG#v}"   # v17.2.9 -> 17.2.9
 
 WORK="$(mktemp -d)"
