@@ -103,6 +103,11 @@ if [ -z "${GH_TOKEN:-}" ] || ! command -v gh >/dev/null 2>&1; then
   echo "[warn] 无 gh 或 GH_TOKEN，跳过发布（本地测试模式）"
   exit 0
 fi
+# gh 默认按当前目录的 git remote 推断目标仓库；而本脚本 CWD 在上游克隆里，
+# 不显式指定会把上游误判为发布目标（gh release view 误报"已存在"而跳过）。
+if [ -n "${GITHUB_REPOSITORY:-}" ]; then
+  export GH_REPO="$GITHUB_REPOSITORY"
+fi
 RELEASE_TAG="${TAG}"   # 发布 tag 与上游保持一致（如 v17.2.9）
 if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
   echo "release ${RELEASE_TAG} 已存在，跳过"

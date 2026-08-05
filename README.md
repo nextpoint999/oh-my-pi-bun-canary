@@ -62,6 +62,9 @@
   缺失时自动回退 latest。musl 目标复用 linux 同名 addon（官方脚本约定）。
 - 每轮最多处理 3 个新版本，防止长时间运行超时；遗漏版本由后续轮询自动补齐
   （版本对比基于"本仓库是否已有同名 <tag> release"，幂等可重入）。
+- **gh 仓库推断坑**：`gh` 默认按当前目录 git remote 推断目标仓库，而构建脚本 CWD
+  在上游克隆里，必须显式 `export GH_REPO="$GITHUB_REPOSITORY"`，否则会把上游
+  误判为发布目标（`gh release view` 误报"已存在"导致发布被跳过）。
 
 ## 已验证
 
