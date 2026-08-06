@@ -189,15 +189,22 @@ RELEASE_TAG="${TAG}"   # 发布 tag 与上游保持一致（如 v17.2.9）
 # 上游克隆自带同名本地 tag，gh 会报 "tag exists locally but has not been
 # pushed" 而拒绝创建；删掉本地 tag，并显式 --target 默认分支在目标仓库新建。
 git tag -d "$RELEASE_TAG" 2>/dev/null || true
+# release 名与上游保持一致（纯 tag），bun 版本信息放 body
+RELEASE_NOTES="**上游**: [${UPSTREAM_REPO} ${TAG}](https://github.com/${UPSTREAM_REPO}/releases/tag/${TAG})
+
+**构建工具**: bun canary \`${BUN_FULL}\`（revision \`${BUN_REV}\`）
+**平台**: ${TARGETS}
+使用 bun canary 交叉编译的全平台镜像构建，附 SHA256 校验和。"
 if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
   if [ "$FORCE" = "true" ]; then
-    # force 模式：删除旧资产 → 上传新构建（保留 release 本体/说明/日期）
-    echo "release ${RELEASE_TAG} 已存在，force 模式：替换全部资产"
+    # force 模式：删除旧资产 → 上传新构建 → 更新 body（新 canary 信息）
+    echo "release ${RELEASE_TAG} 已存在，force 模式：替换全部资产并更新说明"
     ( cd "$BIN_DIR" && sha256sum ./* > checksums.txt )
     gh release view "$RELEASE_TAG" --json assets -q '.assets[].name' | while read -r aname; do
       [ -n "$aname" ] && gh release delete-asset "$RELEASE_TAG" "$aname" --yes >/dev/null
     done
     gh release upload "$RELEASE_TAG" "$BIN_DIR"/* --clobber
+    gh release edit "$RELEASE_TAG" --notes "$RELEASE_NOTES"
     echo "已更新: https://github.com/${GITHUB_REPOSITORY:-<your-repo>}/releases/tag/${RELEASE_TAG}"
     exit 0
   fi
@@ -207,15 +214,10 @@ fi
 DEFAULT_BRANCH="$(gh repo view --json defaultBranchRef -q '.defaultBranchRef.name' 2>/dev/null || echo main)"
 ( cd "$BIN_DIR" && sha256sum ./* > checksums.txt )
 # 注意: "$BIN_DIR"/* 已包含 checksums.txt，不能重复显式传入（否则 422 already exists）
-# release 名与上游保持一致（纯 tag），bun 版本信息放 body
 gh release create "$RELEASE_TAG" "$BIN_DIR"/* \
   --target "$DEFAULT_BRANCH" \
   --title "${TAG}" \
-  --notes "**上游**: [${UPSTREAM_REPO} ${TAG}](https://github.com/${UPSTREAM_REPO}/releases/tag/${TAG})
-
-**构建工具**: bun canary \`${BUN_FULL}\`（revision \`${BUN_REV}\`）
-**平台**: ${TARGETS}
-使用 bun canary 交叉编译的全平台镜像构建，附 SHA256 校验和。"
+  --notes "$RELEASE_NOTES"
 # 若上游是预发布（tag 含 -），标记为 prerelease
 if [[ "$TAG" == *-* ]]; then
   gh release edit "$RELEASE_TAG" --prerelease >/dev/null 2>&1 || true
