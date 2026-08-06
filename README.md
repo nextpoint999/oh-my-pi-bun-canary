@@ -34,6 +34,9 @@
    - `targets`：构建目标，逗号分隔，默认 `all`（7 平台）
    - `latest`：latest 徽标处理——`auto`（默认，按上游最新版本）/ `yes`（本次
      构建版本设为 latest，如强制历史版本上位）/ `no`（不修改）
+   - `force`：勾选后**强制重建**——即使该 tag 已发布也重新构建，并替换已有
+     release 的全部资产（用于把 release 更新到最新 bun canary；release 本体/
+     说明/日期保留，只换二进制和 checksums）
 
 3. 发布权限：workflow 已声明 `permissions: contents: write`，GitHub 自动提供
    GITHUB_TOKEN，无需额外配置。仓库公开后 release 对所有人可见。

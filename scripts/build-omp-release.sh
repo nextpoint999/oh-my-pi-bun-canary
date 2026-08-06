@@ -4,11 +4,13 @@
 # 全平台二进制，并发布到本仓库（镜像发布）。
 #
 # 用法:
-#   bash scripts/build-omp-release.sh <upstream-tag> [targets]
+#   bash scripts/build-omp-release.sh <upstream-tag> [targets] [force]
 #     <upstream-tag>  上游 tag，如 v17.2.9（或任意 git tag/分支）
 #     [targets]       逗号分隔的 target id；默认 all（7 个平台）
 #                     可选: win32-x64, darwin-arm64, darwin-x64, linux-x64,
 #                           linux-musl-x64, linux-arm64, linux-musl-arm64
+#     [force]         true 时：即使该 tag 已发布也重建，并替换已有 release
+#                     的全部资产（用于把 release 更新到最新 bun canary）
 #
 # 依赖: bun(canary) / git / curl / python3(zipfile) / sha256sum / gh(仅发布步骤)
 #
@@ -26,8 +28,9 @@
 set -euo pipefail
 
 UPSTREAM_REPO="can1357/oh-my-pi"
-TAG="${1:?用法: $0 <upstream-tag> [targets]}"
+TAG="${1:?用法: $0 <upstream-tag> [targets] [force]}"
 TARGETS_ARG="${2:-all}"
+FORCE="${3:-}"   # "true" = 强制重建并替换已有 release 资产
 
 # 防止 - 开头的 tag 被 git/gh 解析为选项
 case "$TAG" in
@@ -187,7 +190,18 @@ RELEASE_TAG="${TAG}"   # 发布 tag 与上游保持一致（如 v17.2.9）
 # pushed" 而拒绝创建；删掉本地 tag，并显式 --target 默认分支在目标仓库新建。
 git tag -d "$RELEASE_TAG" 2>/dev/null || true
 if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-  echo "release ${RELEASE_TAG} 已存在，跳过"
+  if [ "$FORCE" = "true" ]; then
+    # force 模式：删除旧资产 → 上传新构建（保留 release 本体/说明/日期）
+    echo "release ${RELEASE_TAG} 已存在，force 模式：替换全部资产"
+    ( cd "$BIN_DIR" && sha256sum ./* > checksums.txt )
+    gh release view "$RELEASE_TAG" --json assets -q '.assets[].name' | while read -r aname; do
+      [ -n "$aname" ] && gh release delete-asset "$RELEASE_TAG" "$aname" --yes >/dev/null
+    done
+    gh release upload "$RELEASE_TAG" "$BIN_DIR"/* --clobber
+    echo "已更新: https://github.com/${GITHUB_REPOSITORY:-<your-repo>}/releases/tag/${RELEASE_TAG}"
+    exit 0
+  fi
+  echo "release ${RELEASE_TAG} 已存在，跳过（如需重建请用 force=true）"
   exit 0
 fi
 DEFAULT_BRANCH="$(gh repo view --json defaultBranchRef -q '.defaultBranchRef.name' 2>/dev/null || echo main)"
