@@ -73,7 +73,9 @@ jobs:
           for t in $TAGS; do
             # -F: 固定字符串匹配（tag 中的 . + 是正则元字符，不能当正则用）
             if printf '%s\n' "$MIRRORED" | grep -Fqx "${t}"; then
-              echo "已镜像: ${t}，跳过"
+              echo "已镜像: ${t}，跳过（更旧的版本不再补发，仅手动指定时构建）"
+              # 上游按最新优先排列，遇到第一个已镜像版本即停止——不补历史
+              break
             else
               NEW="$NEW $t"
             fi

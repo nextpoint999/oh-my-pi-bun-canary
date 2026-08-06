@@ -75,6 +75,12 @@
   1) 批次内按版本升序构建（`sort -V`），最新版最后发布；
   2) 构建完成后调用 `make_latest=true` API 把上游最新版本显式设为 latest，
   覆盖任何日期顺序误判。
+- **不补历史版本**：定时任务只镜像"比已镜像版本更新"的 release（上游列表按最新
+  优先，遇到第一个已镜像版本即停止）；需要历史版本时用 workflow_dispatch 手动
+  指定 tag 构建。
+- **canary 移动 tag 竞态**：bun canary 每次 commit 都会重新构建发布，SHASUMS256.txt
+  与 zip 分两次下载可能来自不同构建导致 sha256 不匹配（不是供应链攻击）。
+  脚本内置 5 次整体重试（重新拉 shas.txt + zip）。
 - **bun 版本号坑**：`bun --version` 只返回 `1.4.0`，完整 canary 版本号
   （`1.4.0-canary.1+b58cd4685`）要用 `bun --revision` 取。
 

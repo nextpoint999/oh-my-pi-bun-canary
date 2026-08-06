@@ -131,12 +131,23 @@ mkdir -p "$BUN_CACHE_DIR"
 curl -fsSL -o "$WORK/shas.txt" "https://github.com/oven-sh/bun/releases/download/canary/SHASUMS256.txt"
 for entry in "${RUN_ENTRIES[@]}"; do
   id="${entry%%|*}"; rest="${entry#*|}"; asset="${rest%%|*}"; cname="${rest#*|}"
-  curl -fsSL -o "$WORK/rt.zip" "https://github.com/oven-sh/bun/releases/download/canary/${asset}"
-  # 供应链完整性校验：与 canary release 的 SHASUMS256.txt 比对
-  expected="$(awk -v f="${asset}" '$2==f {print $1}' "$WORK/shas.txt")"
+  # 供应链完整性校验 + 移动 tag 竞态重试:
+  # canary 是移动 tag（每次 commit 重新构建），SHASUMS256.txt 与 zip 分两次
+  # 下载可能来自不同构建导致 hash 不匹配；失败则整体重拉（最多 5 次）。
+  expected=""; actual=""
+  for attempt in 1 2 3 4 5; do
+    curl -fsSL -o "$WORK/shas.txt" "https://github.com/oven-sh/bun/releases/download/canary/SHASUMS256.txt"
+    curl -fsSL -o "$WORK/rt.zip" "https://github.com/oven-sh/bun/releases/download/canary/${asset}"
+    expected="$(awk -v f="${asset}" '$2==f {print $1}' "$WORK/shas.txt")"
+    actual="$(sha256sum "$WORK/rt.zip" | cut -d' ' -f1)"
+    if [ -n "$expected" ] && [ "$expected" = "$actual" ]; then
+      break
+    fi
+    echo "  [warn] ${asset} sha256 不匹配（第 ${attempt} 次，canary 更新中），5s 后重试"
+    sleep 5
+  done
   [ -n "$expected" ] || { echo "[error] ${asset} 不在 SHASUMS256.txt 中"; exit 1; }
-  actual="$(sha256sum "$WORK/rt.zip" | cut -d' ' -f1)"
-  [ "$expected" = "$actual" ] || { echo "[error] ${asset} sha256 不匹配 (期望 ${expected}, 实际 ${actual})"; exit 1; }
+  [ "$expected" = "$actual" ] || { echo "[error] ${asset} sha256 多次不匹配 (期望 ${expected}, 实际 ${actual})"; exit 1; }
   python3 -m zipfile -e "$WORK/rt.zip" "$WORK/rt"
   rtbin="$(find "$WORK/rt" -type f \( -name bun -o -name bun.exe \) | head -1)"
   [ -n "$rtbin" ] || { echo "[error] ${asset} 内未找到 bun/bun.exe"; exit 1; }
