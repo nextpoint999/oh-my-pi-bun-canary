@@ -30,8 +30,10 @@
 
 2. 推送后 workflow 会自动按 cron（UTC 每 6 小时）运行；也可以到
    Actions → **Mirror omp releases** → Run workflow 手动触发：
-   - `tag`：指定上游 tag 强制构建（如 `v17.2.9`），留空则自动检测
+   - `tag`：指定上游 tag 强制构建（如 `v17.2.9`，含历史版本），留空则自动检测
    - `targets`：构建目标，逗号分隔，默认 `all`（7 平台）
+   - `latest`：latest 徽标处理——`auto`（默认，按上游最新版本）/ `yes`（本次
+     构建版本设为 latest，如强制历史版本上位）/ `no`（不修改）
 
 3. 发布权限：workflow 已声明 `permissions: contents: write`，GitHub 自动提供
    GITHUB_TOKEN，无需额外配置。仓库公开后 release 对所有人可见。

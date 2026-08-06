@@ -29,6 +29,15 @@ on:
         required: false
         default: all
         type: string
+      latest:
+        description: "手动构建后 latest 徽标处理：auto=按上游最新版本(默认)；yes=将本次构建版本设为 latest；no=不修改"
+        required: false
+        default: auto
+        type: choice
+        options:
+          - auto
+          - yes
+          - no
 
 permissions:
   contents: write
@@ -96,6 +105,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           NEW_TAGS: ${{ steps.versions.outputs.new_tags }}
           TARGETS_INPUT: ${{ inputs.targets }}
+          LATEST_INPUT: ${{ inputs.latest }}
           UPSTREAM: can1357/oh-my-pi
         run: |
           set -euo pipefail
@@ -105,14 +115,28 @@ jobs:
             echo "===== 构建上游 ${tag} ====="
             bash scripts/build-omp-release.sh "$tag" "${TARGETS_INPUT}"
           done
-          # 显式把"上游最新版本"的镜像 release 设为 latest（make_latest=true），
-          # 覆盖任何日期顺序造成的误判（如手动补发旧版本后）。
-          NEWEST="$(gh api "repos/${UPSTREAM}/releases/latest" --jq '.tag_name' 2>/dev/null || true)"
-          if [ -n "$NEWEST" ]; then
-            RID="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${NEWEST}" --jq '.id' 2>/dev/null || true)"
+          # --- latest 徽标处理（make_latest=true 显式指定，覆盖日期误判） ---
+          LATEST_MODE="${LATEST_INPUT:-auto}"
+          if [ "$LATEST_MODE" = "no" ]; then
+            echo "latest=no，不修改 latest 徽标"
+          elif [ "$LATEST_MODE" = "yes" ]; then
+            # 手动构建：将本次构建的最新版本设为 latest（如强制历史版本上位）
+            TARGET_TAG="$(echo "$NEW_TAGS" | tr ' ' '\n' | head -1)"
+            RID="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TARGET_TAG}" --jq '.id' 2>/dev/null || true)"
             if [ -n "$RID" ]; then
               gh api -X PATCH "repos/${GITHUB_REPOSITORY}/releases/${RID}" -f make_latest=true >/dev/null \
-                && echo "已将 ${NEWEST} 设为 latest" \
+                && echo "已将 ${TARGET_TAG} 设为 latest" \
                 || echo "[warn] make_latest 设置失败（预发布版本无法设为 latest，属预期）"
+            fi
+          else
+            # auto（默认）：把"上游最新版本"的镜像 release 设为 latest
+            NEWEST="$(gh api "repos/${UPSTREAM}/releases/latest" --jq '.tag_name' 2>/dev/null || true)"
+            if [ -n "$NEWEST" ]; then
+              RID="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${NEWEST}" --jq '.id' 2>/dev/null || true)"
+              if [ -n "$RID" ]; then
+                gh api -X PATCH "repos/${GITHUB_REPOSITORY}/releases/${RID}" -f make_latest=true >/dev/null \
+                  && echo "已将 ${NEWEST} 设为 latest" \
+                  || echo "[warn] make_latest 设置失败（预发布版本无法设为 latest，属预期）"
+              fi
             fi
           fi
