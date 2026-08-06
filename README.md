@@ -32,8 +32,9 @@
    Actions → **Mirror omp releases** → Run workflow 手动触发：
    - `tag`：指定上游 tag 强制构建（如 `v17.2.9`，含历史版本），留空则自动检测
    - `targets`：构建目标，逗号分隔，默认 `all`（7 平台）
-   - `latest`：latest 徽标处理——`auto`（默认，按上游最新版本）/ `yes`（本次
-     构建版本设为 latest，如强制历史版本上位）/ `no`（不修改）
+   - `latest`：latest 徽标处理——`auto`（默认，按上游最新版本）/ `set`（本次
+     构建版本设为 latest，如强制历史版本上位）/ `keep`（不修改）。
+     注意：不能用 yes/no（YAML 会把它们解析为布尔值，GitHub 会拒绝该值）
    - `force`：勾选后**强制重建**——即使该 tag 已发布也重新构建，并替换已有
      release 的全部资产（用于把 release 更新到最新 bun canary；release 本体/
      说明/日期保留，只换二进制和 checksums）

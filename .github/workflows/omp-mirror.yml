@@ -30,14 +30,14 @@ on:
         default: all
         type: string
       latest:
-        description: "手动构建后 latest 徽标处理：auto=按上游最新版本(默认)；yes=将本次构建版本设为 latest；no=不修改"
+        description: "手动构建后 latest 徽标处理：auto=按上游最新版本(默认)；set=将本次构建版本设为 latest；keep=不修改（注意: 不能用 yes/no，YAML 会解析为布尔值）"
         required: false
         default: auto
         type: choice
         options:
           - auto
-          - yes
-          - no
+          - set
+          - keep
       force:
         description: "强制重建：即使该 tag 已发布也重新构建，并替换已有 release 的全部资产（用于更新到最新 bun canary）"
         required: false
@@ -131,9 +131,9 @@ jobs:
           done
           # --- latest 徽标处理（make_latest=true 显式指定，覆盖日期误判） ---
           LATEST_MODE="${LATEST_INPUT:-auto}"
-          if [ "$LATEST_MODE" = "no" ]; then
-            echo "latest=no，不修改 latest 徽标"
-          elif [ "$LATEST_MODE" = "yes" ]; then
+          if [ "$LATEST_MODE" = "keep" ]; then
+            echo "latest=keep，不修改 latest 徽标"
+          elif [ "$LATEST_MODE" = "set" ]; then
             # 手动构建：将本次构建的最新版本设为 latest（如强制历史版本上位）
             TARGET_TAG="$(echo "$NEW_TAGS" | tr ' ' '\n' | head -1)"
             RID="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TARGET_TAG}" --jq '.id' 2>/dev/null || true)"
