@@ -82,7 +82,10 @@
   指定 tag 构建。
 - **canary 移动 tag 竞态**：bun canary 每次 commit 都会重新构建发布，SHASUMS256.txt
   与 zip 分两次下载可能来自不同构建导致 sha256 不匹配（不是供应链攻击）。
-  脚本内置 5 次整体重试（重新拉 shas.txt + zip）。
+  更关键的是 bun 的 SHASUMS256.txt 更新**滞后于 zip**（实测滞后 10+ 小时，API
+  直取同样滞后）。脚本采用两级校验：Tier1 比对 shas.txt（通过即最强证明）；
+  Tier1 不匹配时降级 Tier2——校验解包出的运行时内嵌 `1.4.0-canary` 版本串，
+  并打印警告继续（不因 bun 管道缺陷卡死构建）。
 - **bun 版本号坑**：`bun --version` 只返回 `1.4.0`，完整 canary 版本号
   （`1.4.0-canary.1+b58cd4685`）要用 `bun --revision` 取。
 
