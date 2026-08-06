@@ -64,10 +64,11 @@ jobs:
           if [ -n "${TAG_INPUT}" ]; then
             TAGS="${TAG_INPUT}"
           else
-            TAGS="$(gh api "repos/${UPSTREAM}/releases?per_page=100" --jq '.[].tag_name')"
+            # --paginate: 上游 release 可能超过 100 个，逐页取全
+            TAGS="$(gh api "repos/${UPSTREAM}/releases?per_page=100" --paginate --jq '.[].tag_name')"
           fi
           # 本仓库已发布的版本（发布 tag 与上游同名，如 v17.2.9）
-          MIRRORED="$(gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100" --jq '.[].tag_name' 2>/dev/null || true)"
+          MIRRORED="$(gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100" --paginate --jq '.[].tag_name' 2>/dev/null || true)"
           NEW=""
           for t in $TAGS; do
             # -F: 固定字符串匹配（tag 中的 . + 是正则元字符，不能当正则用）
@@ -77,8 +78,11 @@ jobs:
               NEW="$NEW $t"
             fi
           done
-          # 每轮最多处理 5 个新版本，避免单轮超时；遗漏的由后续轮询补齐
-          NEW="$(echo "$NEW" | tr ' ' '\n' | sed '/^$/d' | head -5)"
+          # 每轮最多处理 10 个新版本（每个版本约 2 分钟构建，10 个 ≈ 20 分钟，
+          # 远低于 120 分钟超时）；遗漏的由后续轮询补齐
+          # 注意: 必须用 paste 合并成单行——多行值写入 GITHUB_OUTPUT 会触发
+          # "Invalid format" 报错（第二行没有 key= 前缀）。
+          NEW="$(echo "$NEW" | tr ' ' '\n' | sed '/^$/d' | head -10 | paste -sd' ' -)"
           if [ -z "$NEW" ]; then
             echo "没有新的上游版本需要构建"
           fi
