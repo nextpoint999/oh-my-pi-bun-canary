@@ -1,14 +1,15 @@
 # =============================================================================
 # omp 镜像发布 workflow
 #
-# 定时(每 6 小时)检查上游 can1357/oh-my-pi 的新 release；发现新 tag 就用该 tag
-# 源码 + 最新 bun canary 构建全部 7 个平台二进制，发布到本仓库
-# （发布 tag 与上游保持一致，如 v17.2.9）。
+# 定时(每 6 小时)检查上游 can1357/oh-my-pi 的 release；有新版就用该 tag 源码 +
+# 最新 bun canary 构建全部 7 个平台二进制，发布到本仓库
+# （发布 tag 与上游保持一致，如 v17.2.10）。
 #
 # 说明:
-#   * 每次运行最多处理 5 个新版本（release 不频繁，后续轮询自动补齐遗漏版本）
+#   * 自动/定时只镜像【上游最新版】（per_page=1）；历史/指定版本需手动
+#     dispatch 指定 tag（可配合 force 强制重建）
 #   * 原生模块直接取官方 npm leaf（免 bazel 交叉编译），运行时从 bun canary
-#     tag 注入并经 SHASUMS256.txt 校验（详见 scripts/build-omp-release.sh 头注释）
+#     tag 注入并经两级完整性校验（详见 scripts/build-omp-release.sh 头注释）
 #   * 本仓库需开启 Actions；发布用的 GITHUB_TOKEN 自动授权（contents: write）
 #   * 安全: 用户输入（tag/targets）一律经 env 传递，禁止插值进 run: 脚本
 # =============================================================================
@@ -80,9 +81,9 @@ jobs:
             TAGS="${TAG_INPUT}"
             SKIP_MIRRORED="false"   # 手动指定 tag：允许 force 强制重建
           else
-            # --paginate: 上游 release 可能超过 100 个，逐页取全
-            TAGS="$(gh api "repos/${UPSTREAM}/releases?per_page=100" --paginate --jq '.[].tag_name')"
-            SKIP_MIRRORED="true"    # 定时任务：遇已镜像即停（不补历史）
+            # 只取上游最新一个 release（per_page=1，含预发布）
+            TAGS="$(gh api "repos/${UPSTREAM}/releases?per_page=1" --jq '.[].tag_name')"
+            SKIP_MIRRORED="true"    # 自动/定时：只更新最新版，不补历史
           fi
           # 本仓库已发布的版本（发布 tag 与上游同名，如 v17.2.9）
           MIRRORED="$(gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100" --paginate --jq '.[].tag_name' 2>/dev/null || true)"

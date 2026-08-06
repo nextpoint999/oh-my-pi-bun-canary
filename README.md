@@ -7,9 +7,7 @@
 ## 工作原理
 
 ```
-定时(每6h) ──▶ 查上游最新 releases ──▶ 对比本仓库已发布的同名 releases
-                │
-                └─ 有新版本(每轮最多3个) ──▶ clone 上游 tag
+定时(每6h) ──▶ 取上游【最新一个】release ──▶ 已镜像则跳过；未镜像则构建发布
                                               ├─ bun install
                                               ├─ 原生模块: 官方 npm leaf (免 bazel)
                                               ├─ 运行时: bun canary tag 注入缓存
