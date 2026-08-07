@@ -1,13 +1,15 @@
 # =============================================================================
 # omp 镜像发布 workflow
 #
-# 定时(每 6 小时)检查上游 can1357/oh-my-pi 的 release；有新版就用该 tag 源码 +
+# 定时(每 2 小时)检查上游 can1357/oh-my-pi 的 release；有新版就用该 tag 源码 +
 # 最新 bun canary 构建全部 7 个平台二进制，发布到本仓库
 # （发布 tag 与上游保持一致，如 v17.2.10）。
 #
 # 说明:
 #   * 自动/定时只镜像【上游最新版】（per_page=1）；历史/指定版本需手动
 #     dispatch 指定 tag（可配合 force 强制重建）
+#   * 每 2h 定时还会对比 bun canary revision 与最新 release body 中的
+#     revision——canary 前进时自动强制重建最新版（无需手动 force）
 #   * 原生模块直接取官方 npm leaf（免 bazel 交叉编译），运行时从 bun canary
 #     tag 注入并经两级完整性校验（详见 scripts/build-omp-release.sh 头注释）
 #   * 本仓库需开启 Actions；发布用的 GITHUB_TOKEN 自动授权（contents: write）
@@ -17,8 +19,8 @@ name: Mirror omp releases
 
 on:
   schedule:
-    # UTC 每 6 小时（GitHub cron 使用 UTC）
-    - cron: "0 */6 * * *"
+    # UTC 每 2 小时（GitHub cron 使用 UTC）；最新版已镜像但 bun canary 前进时自动强制重建
+    - cron: "0 */2 * * *"
   workflow_dispatch:
     inputs:
       tag:
@@ -108,10 +110,27 @@ jobs:
           # 注意: 必须用 paste 合并成单行——多行值写入 GITHUB_OUTPUT 会触发
           # "Invalid format" 报错（第二行没有 key= 前缀）。
           NEW="$(echo "$NEW" | tr ' ' '\n' | sed '/^$/d' | head -10 | paste -sd' ' -)"
+
+          # 自动 force：最新版已镜像时，若 bun canary 已前进则强制重建
+          # （每 2h 定时检查；比较当前 canary revision 与 release body 里的 revision）
+          FORCE_NEEDED="false"
+          if [ -z "$NEW" ] && [ -n "$TAGS" ] && [ "$SKIP_MIRRORED" = "true" ]; then
+            LATEST_TAG="$(echo "$TAGS" | head -1)"
+            CUR_REV="$(bun --revision 2>/dev/null | grep -o '+[a-f0-9]\{9\}' | head -1 || true)"
+            LAST_REV="$(gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=1" --jq '.[0].body' 2>/dev/null | grep -o '+[a-f0-9]\{9\}' | head -1 || true)"
+            if [ -n "$CUR_REV" ] && [ -n "$LAST_REV" ] && [ "$CUR_REV" != "$LAST_REV" ]; then
+              NEW="$LATEST_TAG"
+              FORCE_NEEDED="true"
+              echo "canary 已前进: ${LAST_REV} → ${CUR_REV}，强制重建 ${LATEST_TAG}"
+            else
+              echo "canary 无变化 (${CUR_REV:-无})，跳过"
+            fi
+          fi
           if [ -z "$NEW" ]; then
             echo "没有新的上游版本需要构建"
           fi
           echo "new_tags=${NEW}" >> "$GITHUB_OUTPUT"
+          echo "force_needed=${FORCE_NEEDED}" >> "$GITHUB_OUTPUT"
 
       - name: 构建并发布新版本
         if: ${{ steps.versions.outputs.new_tags != '' }}
@@ -121,14 +140,19 @@ jobs:
           TARGETS_INPUT: ${{ inputs.targets }}
           LATEST_INPUT: ${{ inputs.latest }}
           FORCE_INPUT: ${{ inputs.force }}
+          FORCE_NEEDED: ${{ steps.versions.outputs.force_needed }}
           UPSTREAM: can1357/oh-my-pi
         run: |
           set -euo pipefail
+          # 手动 force 或自动检测到 canary 前进 → 强制重建
+          FORCE_FLAG="false"
+          [ "${FORCE_INPUT:-false}" = "true" ] && FORCE_FLAG="true"
+          [ "${FORCE_NEEDED:-false}" = "true" ] && FORCE_FLAG="true"
           # 按版本升序构建（最新版最后发布 → 自然成为 latest；避免旧版本
           # 后发布抢走 latest 徽标——GitHub 默认按发布时间而非版本号定 latest）
           for tag in $(echo "$NEW_TAGS" | tr ' ' '\n' | sort -V); do
             echo "===== 构建上游 ${tag} ====="
-            bash scripts/build-omp-release.sh "$tag" "${TARGETS_INPUT}" "${FORCE_INPUT:-false}"
+            bash scripts/build-omp-release.sh "$tag" "${TARGETS_INPUT}" "$FORCE_FLAG"
           done
           # --- latest 徽标处理（make_latest=true 显式指定，覆盖日期误判） ---
           LATEST_MODE="${LATEST_INPUT:-auto}"

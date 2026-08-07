@@ -7,12 +7,14 @@
 ## 工作原理
 
 ```
-定时(每6h) ──▶ 取上游【最新一个】release ──▶ 已镜像则跳过；未镜像则构建发布
-                                              ├─ bun install
-                                              ├─ 原生模块: 官方 npm leaf (免 bazel)
-                                              ├─ 运行时: bun canary tag 注入缓存
-                                              └─ bun build --compile 全平台
-                                                   └─ gh release create 发布
+定时(每2h) ──▶ 取上游【最新一个】release ──▶ 已镜像则跳过；未镜像则构建发布
+                │
+                └─ 已镜像但 bun canary 已前进 ──▶ 自动 force 重建最新版
+              ├─ bun install
+              ├─ 原生模块: 官方 npm leaf (免 bazel)
+              ├─ 运行时: bun canary tag 注入缓存
+              └─ bun build --compile 全平台
+                   └─ gh release create 发布
 ```
 
 发布 tag 与上游保持一致（如 `v17.2.9`），附 SHA256 校验和。
@@ -26,7 +28,7 @@
    scripts/build-omp-release.sh      ← 单版本构建脚本
    ```
 
-2. 推送后 workflow 会自动按 cron（UTC 每 6 小时）运行；也可以到
+2. 推送后 workflow 会自动按 cron（UTC 每 2 小时）运行；也可以到
    Actions → **Mirror omp releases** → Run workflow 手动触发：
    - `tag`：指定上游 tag 强制构建（如 `v17.2.9`，含历史版本），留空则自动检测
    - `targets`：构建目标，逗号分隔，默认 `all`（7 平台）
