@@ -59,8 +59,8 @@ jobs:
     timeout-minutes: 120
     steps:
       - name: Checkout
-        # 固定 SHA（= actions/checkout@v4），防供应链篡改；升级时同步更新
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        # 固定 SHA（v7.0.1，node24 运行时，Node 20 已弃用）防供应链篡改；升级时更新 SHA 与注释
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
       - name: 安装 bun canary
         # 固定 SHA（= oven-sh/setup-bun@v2），防供应链篡改；升级时同步更新
